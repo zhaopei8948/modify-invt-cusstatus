@@ -1,7 +1,17 @@
 #include "tool.h"
 #include "oracle_operator.h"
 #include <iostream>
+#include <fstream>
 #include "tinyxml2.h"
+
+std::string getTodayLogFileName()
+{
+	SYSTEMTIME now;
+	GetLocalTime(&now);
+	char ct[18];
+	std::snprintf(ct, 18, "logs\\%4d%02d%02d.log", now.wYear, now.wMonth, now.wDay);
+	return ct;
+}
 
 int main(int argc, char* argv[])
 {
@@ -23,19 +33,25 @@ int main(int argc, char* argv[])
 		return nullptr;
 	});*/
 
+	std::string preLogFileName = getTodayLogFileName();
+	std::ofstream logFile = std::ofstream(getTodayLogFileName());
 	WinTools::setSrcdir(srcdir);
-	WinTools::setCallBack([&oracleOper](const std::string srcdir, const std::string filename, const WIN32_FIND_DATA* findData, void* para) {
+	WinTools::setCallBack([&preLogFileName, &logFile, &oracleOper](const std::string srcdir, const std::string filename, const WIN32_FIND_DATA* findData, void* para) {
 		//std::cout << "filename: [" << filename << "]\n";
 		tinyxml2::XMLDocument doc;
 		std::string path = srcdir + "\\" + filename;
 		doc.LoadFile(path.c_str());
 		tinyxml2::XMLElement* rootElement = doc.FirstChildElement("InventoryStatus");
+		if (rootElement == nullptr) {
+			std::cout << "not input invt, not handle!!!\n";
+			return;
+		}
 		std::string ebcCode(rootElement->FirstChildElement("ebcCode")->GetText());
 		std::string copNo(rootElement->FirstChildElement("copNo")->GetText());
 		std::string cusStatus(rootElement->FirstChildElement("returnStatus")->GetText());
 		std::cout << "ebcCode: [" << ebcCode << "] copNo: [" << copNo << "] cusStatus: [" << cusStatus << "]\n";
 		oracleOper->select("select t.app_status, t.invt_no from ceb2_invt_head t where t.ebc_code = '"
-			+ ebcCode + "' and t.cop_no = '" + copNo + "'", [&ebcCode, &copNo, &cusStatus, &oracleOper](void* rs) -> void* {
+			+ ebcCode + "' and t.cop_no = '" + copNo + "'", [&preLogFileName, &logFile, &ebcCode, &copNo, &cusStatus, &oracleOper](void* rs) -> void* {
 			oracle::occi::ResultSet* resultSet = (oracle::occi::ResultSet*) rs;
 			if (resultSet->next()) {
 				std::string appStatus = resultSet->getString(1);
@@ -46,10 +62,18 @@ int main(int argc, char* argv[])
 					std::string updateInvt = "update ceb2_invt_head t set t.invt_no = '" + invtNo + "', t.app_status='800' where t.ebc_code = '" + ebcCode
 						+ "' and t.cop_no = '" + copNo + "'";
 					oracleOper->executeUpdate(updateInvt);
-					std::cout << "update ebcCode: [" << ebcCode << "] copNo: [" << copNo << "] appStatus: [800] invtNo: [" << invtNo << "] success!\n";
+					std::string newFileName = getTodayLogFileName();
+					if (newFileName != preLogFileName) {
+						logFile.close();
+						logFile = std::ofstream(newFileName);
+						preLogFileName = newFileName;
+					}
+					logFile << "update ebcCode: [" << ebcCode << "] copNo: [" << copNo << "] appStatus: [800] invtNo: [" << invtNo << "] success!\n";
+					logFile.flush();
 				}
 				return nullptr;
 			}
+			return nullptr;
 		});
 	});
 	WinTools::setOracOper(oracleOper);
@@ -57,5 +81,6 @@ int main(int argc, char* argv[])
 	tool.start();
 
 	delete oracleOper;
+	logFile.close();
 	return 0;
 }
