@@ -39,6 +39,7 @@ unsigned int OracleOperator::executeUpdate(const std::string& sql)
 	unsigned int result;
 	stmt = conn->createStatement();
 	result = stmt->executeUpdate(sql);
+	conn->commit();
 	conn->terminateStatement(stmt);
 	return result;
 }
